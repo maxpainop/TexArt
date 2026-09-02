@@ -1,0 +1,462 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>TexArt</title>
+
+    <link rel="stylesheet" href="XP.css" />
+    <link rel="stylesheet" href="styles.css" />
+
+    <style>
+        [hidden] {
+            display: none !important;
+        }
+
+        /* let the title bar drag the real tauri window */
+        .titlebar,
+        .titlebar-left,
+        .title-icon,
+        #window-title {
+            -webkit-app-region: drag;
+        }
+
+        .title-bar-controls button,
+        .menubar,
+        .xp-context-menu,
+        .palette-swatch,
+        button {
+            -webkit-app-region: no-drag;
+        }
+
+        /* keep menu compact like the old desktop apps */
+        #menubar {
+            justify-content: flex-start;
+            gap: 0;
+        }
+
+        .menubar .menu-top {
+            min-width: 0;
+            min-height: 0;
+            padding: 1px 6px;
+            background: transparent;
+            border: 1px solid transparent;
+            box-shadow: none;
+            border-radius: 2px;
+        }
+
+            .menubar .menu-top:hover {
+                background: #d3e4fd;
+                border-color: #9fc4f0;
+            }
+
+        /* styles.css handles the actual context menu look */
+        .xp-context-menu button.xp-context-menu-item {
+            appearance: none;
+            -webkit-appearance: none;
+            background: transparent;
+            border: none;
+            font: inherit;
+            color: inherit;
+            display: block;
+            width: 100%;
+            text-align: left;
+            margin: 0;
+        }
+
+        /* the animation always stays clipped inside this black work area */
+        #texart-output-shell {
+            flex: 1;
+            min-height: 0;
+            position: relative;
+            overflow: hidden;
+            background: #000;
+            border: 2px inset #d4d0c8;
+            margin: 4px 6px 2px 6px;
+            padding: 0;
+        }
+
+        #texart-output {
+            margin: 0;
+            white-space: pre;
+            color: #00ff00;
+            font-family: "Perfect DOS VGA 437 Win", monospace;
+        }
+
+        #texart-canvas {
+            display: block;
+            background: #000;
+            max-width: 100%;
+            max-height: 100%;
+        }
+
+        #texart-placeholder {
+            position: absolute;
+            top: 8px;
+            left: 8px;
+            color: #00ff00;
+            font-family: "Perfect DOS VGA 437 Win", monospace;
+            font-size: 14px;
+            pointer-events: none;
+            white-space: pre-wrap;
+        }
+
+        /* palette and main actions stay reachable at the bottom */
+        .editor-bottom-bar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            background: #ece9d8;
+            border-top: 1px solid #b8b59c;
+            padding: 3px 6px;
+            flex-shrink: 0;
+        }
+
+        .editor-actions {
+            display: flex;
+            gap: 6px;
+            align-items: center;
+        }
+
+        /* two short rows keep larger palettes from taking over the window */
+        .palette-grid {
+            display: grid;
+            grid-template-columns: repeat(16, 16px);
+            grid-template-rows: repeat(2, 16px);
+            gap: 1px;
+            padding: 2px;
+            background: #ece9d8;
+            border: 2px inset #d4d0c8;
+        }
+
+        .palette-swatch {
+            width: 16px;
+            height: 16px;
+            min-width: 16px;
+            min-height: 16px;
+            padding: 0;
+            border: 1px solid #404040;
+            border-radius: 0;
+            cursor: pointer;
+        }
+
+            .palette-swatch[aria-pressed="true"] {
+                outline: 2px solid #ff7a00;
+                outline-offset: 1px;
+            }
+
+        /* all image-specific controls live in the preview wing */
+        #texart-settings {
+            padding: 12px 0 0 0;
+            border-top: 1px solid #aca899;
+            box-shadow: inset 0 1px 0 #ffffff;
+            background: #ece9d8;
+            display: grid;
+            gap: 6px;
+            margin-top: 12px;
+        }
+
+        /* never stretch the uploaded image just to fill this box */
+        #preview-frame, #image-preview-empty {
+            border: 2px inset #d4d0c8;
+            background: #fff;
+            padding: 2px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100px;
+        }
+        
+        #image-preview-empty {
+            color: #808080;
+            font-style: italic;
+            text-align: center;
+        }
+        
+        #image-preview {
+            max-width: 100%;
+            max-height: 240px;
+            width: auto !important;
+            height: auto !important;
+            object-fit: contain;
+            flex: 0 1 auto;
+            display: block;
+        }
+
+        /* the status strip gets the space left after its fixed items */
+        .status-strip input[type="range"] {
+            width: 120px;
+        }
+    </style>
+
+    <script type="module" src="main.js"></script>
+</head>
+
+<body>
+    <div id="app-shell" class="shell">
+        <div class="app-frame">
+            <!-- custom title bar -->
+            <header class="titlebar" data-tauri-drag-region>
+                <div class="titlebar-left" data-tauri-drag-region>
+                    <img class="title-icon" src="logo.png" alt="" data-tauri-drag-region />
+                    <span id="window-title" data-tauri-drag-region>TexArt</span>
+                </div>
+
+                <div class="title-bar-controls" data-tauri-drag-region="false">
+                    <button id="win-minimize"
+                            aria-label="Minimize"
+                            data-tauri-drag-region="false"></button>
+
+                    <button id="win-maximize"
+                            aria-label="Maximize"
+                            data-tauri-drag-region="false"></button>
+
+                    <button id="win-close"
+                            aria-label="Close"
+                            data-tauri-drag-region="false"></button>
+                </div>
+            </header>
+
+            <!-- desktop menu bar -->
+            <nav class="menubar" id="menubar" data-tauri-drag-region="false">
+                <button id="menu-file" class="menu-top" aria-haspopup="true" aria-expanded="false">
+                    File
+                </button>
+
+                <button id="menu-edit" class="menu-top" aria-haspopup="true" aria-expanded="false">
+                    Edit
+                </button>
+
+                <button id="menu-view" class="menu-top" aria-haspopup="true" aria-expanded="false">
+                    View
+                </button>
+
+                <button id="menu-image" class="menu-top" aria-haspopup="true" aria-expanded="false">
+                    Image
+                </button>
+
+                <button id="menu-colors" class="menu-top" aria-haspopup="true" aria-expanded="false">
+                    Colors
+                </button>
+
+                <button id="menu-help" class="menu-top" aria-haspopup="true" aria-expanded="false">
+                    Help
+                </button>
+            </nav>
+
+            <!-- app screens share the same window body -->
+            <main class="screen-stack">
+                <section class="screen" data-screen="workspace">
+                    <input id="image-file-input" type="file" accept="image/*,.mxa,application/json" hidden />
+
+                    <!-- kept because the shared window code still reads it -->
+                    <div class="buddy-toolbar" hidden>
+                        <button id="settings-reset-btn" class="xp-button">Reset Settings</button>
+                    </div>
+
+                    <!-- kept because the shared window code still reads it -->
+                    <div class="palette-toolbar" hidden>
+                        <button id="palette-auto-btn" class="xp-button tiny-btn">
+                            Pick Prominent Colors
+                        </button>
+
+                        <button id="palette-reset-btn" class="xp-button tiny-btn">
+                            Default Palette
+                        </button>
+                    </div>
+
+                    <!-- generated animation canvas -->
+                    <div id="texart-output-shell" tabindex="0" aria-label="TexArt output">
+                        <canvas id="texart-canvas" width="1" height="1" aria-label="Animated TexArt"></canvas>
+                        <div id="texart-placeholder">&gt; Press File and upload an image to begin.</div>
+                        <pre id="texart-output" hidden></pre>
+                    </div>
+
+                    <!-- palette and main actions -->
+                    <div class="editor-bottom-bar">
+                        <div id="palette-grid" class="palette-grid" aria-label="Palette" data-description="Select a color from the palette."></div>
+                        <input id="palette-color-picker" type="color" aria-hidden="true" tabindex="-1" style="position: fixed; width: 0; height: 0; opacity: 0; pointer-events: none;" />
+
+                        <div class="editor-actions">
+                            <button type="button" id="upload-btn" class="xp-button" style="min-width: 32px; padding: 0;" data-description="Upload a new image file.">📁</button>
+                            <button type="button" id="process-btn" class="xp-button" disabled data-description="Process the image and generate TexArt.">Process</button>
+                        </div>
+                    </div>
+
+                    <!-- current action and image details -->
+                    <div class="status-strip" style="gap: 4px; padding: 2px 4px;">
+                        <span id="status-message" style="flex: 1; border: 1px inset #d4d0c8; padding: 2px 4px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;">Ready. Hover over a control for details.</span>
+                        <span id="status-image-size" style="border: 1px inset #d4d0c8; padding: 2px 4px; min-width: 80px; text-align: center;"></span>
+                    </div>
+                </section>
+            </main>
+        </div>
+
+        <!-- image preview and settings wing -->
+        <aside id="image-wing" class="wing" aria-hidden="true">
+            <div class="wing-titlebar">Image Preview</div>
+
+            <div class="wing-list-scroll" style="flex: 1; overflow: auto; padding: 8px;">
+                <!-- uploaded image preview -->
+                <div id="image-preview-empty">No image uploaded yet.</div>
+
+                <div id="preview-frame" hidden>
+                    <img id="image-preview" alt="Image preview" draggable="false" tabindex="0" role="button" aria-disabled="true" />
+                </div>
+
+                <!-- controls that rebuild the TexArt animation -->
+                <div id="texart-settings">
+                    <div class="field-row" data-description="Shows the generated character-grid resolution.">
+                        <label for="setting-resolution">Resolution:</label>
+                        <output id="setting-resolution">—</output>
+                    </div>
+
+                    <div class="field-row" data-description="Text repeated across every row of the animated image.">
+                        <label for="setting-charset">Text:</label>
+                        <input id="setting-charset" type="text" value="TEXT " autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" />
+                    </div>
+
+                    <div class="field-row" data-description="Sets the rendered text size in pixels.">
+                        <label for="setting-font-size">Text size:</label>
+                        <input id="setting-font-size" type="range" min="5" max="32" step="1" value="12" />
+                        <output id="setting-font-size-value" for="setting-font-size">12px</output>
+                    </div>
+
+                    <div class="field-row" data-description="Selects the font used to render the animation.">
+                        <label for="setting-font-family">Font:</label>
+                        <select id="setting-font-family">
+                            <option value="Perfect DOS VGA 437 Win">DOS VGA</option>
+                            <option value="Courier New">Courier New</option>
+                            <option value="Consolas">Consolas</option>
+                            <option value="Lucida Console">Lucida Console</option>
+                            <option value="monospace">System Monospace</option>
+                        </select>
+                    </div>
+
+                    <div class="field-row" data-description="Moves character cells closer together. Lower values create greater image resolution and overlapping glyphs.">
+                        <label for="setting-character-spacing">Spacing:</label>
+                        <input id="setting-character-spacing" type="range" min="10" max="100" step="5" value="100" />
+                        <output id="setting-character-spacing-value" for="setting-character-spacing">100%</output>
+                    </div>
+
+                    <div class="field-row" data-description="Sets how quickly the text pattern moves across the image.">
+                        <label for="setting-animation-speed">Speed:</label>
+                        <input id="setting-animation-speed" type="range" min="0" max="2" step="0.05" value="0.15" />
+                        <output id="setting-animation-speed-value" class="setting-percent-value" for="setting-animation-speed">15%</output>
+                    </div>
+
+                    <div class="field-row" data-description="Adjusts the overall lightness or darkness of the image.">
+                        <label for="setting-brightness">Brightness:</label>
+                        <input id="setting-brightness" type="range" min="-100" max="100" value="0" />
+                        <output id="setting-brightness-value" class="setting-percent-value" for="setting-brightness">0%</output>
+                    </div>
+
+                    <div class="field-row" data-description="Increases or decreases the difference between light and dark areas.">
+                        <label for="setting-contrast">Contrast:</label>
+                        <input id="setting-contrast" type="range" min="-100" max="100" value="0" />
+                        <output id="setting-contrast-value" class="setting-percent-value" for="setting-contrast">0%</output>
+                    </div>
+
+                    <div class="field-row" data-description="Maximum number of colors to extract for the palette.">
+                        <label for="setting-color-count">Palette size:</label>
+                        <input id="setting-color-count" type="number" min="2" max="256" value="16" />
+                    </div>
+
+                    <div class="field-row" data-description="Maps every text cell to its nearest palette color.">
+                        <input id="setting-palette-mode" type="checkbox" />
+                        <label for="setting-palette-mode">Use palette colors</label>
+                    </div>
+
+                    <div class="field-row" data-description="Inverts the colors and brightness of the output.">
+                        <input id="setting-invert" type="checkbox" />
+                        <label for="setting-invert">Invert</label>
+                    </div>
+
+                    <div class="field-row" data-description="Applies error diffusion to simulate more colors.">
+                        <input id="setting-dither" type="checkbox" />
+                        <label for="setting-dither">Dither</label>
+                    </div>
+
+                </div>
+
+                <fieldset style="margin: 12px 0 0;">
+                    <legend>Export</legend>
+                    <div class="field-row gif-scale-row" data-description="Renders GIF text directly at a larger resolution so it stays crisp.">
+                        <label for="gif-export-scale">GIF scale:</label>
+                        <select id="gif-export-scale">
+                            <option value="1">1x</option>
+                            <option value="2" selected>2x</option>
+                            <option value="3">3x</option>
+                            <option value="4">4x</option>
+                        </select>
+                        <output id="gif-export-size" for="gif-export-scale">Process first</output>
+                    </div>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px;">
+                        <button type="button" id="export-gif-btn" class="xp-button" disabled data-description="Choose where to save one seamless animation loop as GIF.">Save GIF...</button>
+                        <button type="button" id="export-mxa-btn" class="xp-button" disabled data-description="Choose where to save the complete editable animation as an MXA project.">Save MXA...</button>
+                    </div>
+                </fieldset>
+            </div>
+
+            <!-- kept because the shared window code still reads it -->
+            <div class="buddy-toolbar" hidden></div>
+        </aside>
+    </div>
+
+    <!-- menus are positioned by main.js -->
+    <div id="file-menu-popup" class="xp-context-menu" role="menu">
+        <button id="file-open" class="xp-context-menu-item">Open Image or MXA...</button>
+        <button id="file-process" class="xp-context-menu-item" aria-disabled="true">Process</button>
+        <button id="file-export-gif" class="xp-context-menu-item" aria-disabled="true">Export Looping GIF...</button>
+        <button id="file-export-mxa" class="xp-context-menu-item" aria-disabled="true">Export MXA Project...</button>
+        <button id="file-clear" class="xp-context-menu-item" aria-disabled="true">Clear</button>
+        <button id="file-exit" class="xp-context-menu-item">Exit</button>
+    </div>
+
+    <div id="edit-menu-popup" class="xp-context-menu" role="menu">
+        <button id="edit-clear" class="xp-context-menu-item">Clear</button>
+    </div>
+
+    <div id="view-menu-popup" class="xp-context-menu" role="menu">
+        <button id="view-toggle-preview" class="xp-context-menu-item">Toggle Image Preview</button>
+        <button id="view-zoom-100" class="xp-context-menu-item">Zoom 100%</button>
+    </div>
+
+    <div id="image-menu-popup" class="xp-context-menu" role="menu">
+        <button id="image-process" class="xp-context-menu-item" aria-disabled="true">Process Image</button>
+        <button id="image-reset-settings" class="xp-context-menu-item">Reset Settings</button>
+    </div>
+
+    <div id="colors-menu-popup" class="xp-context-menu" role="menu">
+        <button id="colors-auto" class="xp-context-menu-item" aria-disabled="true">Pick Prominent Colors</button>
+        <button id="colors-reset" class="xp-context-menu-item">Default Palette</button>
+    </div>
+
+    <div id="help-menu-popup" class="xp-context-menu" role="menu">
+        <button id="help-about" class="xp-context-menu-item">About</button>
+    </div>
+
+    <!-- this stays inside the app so it behaves like a small desktop window -->
+    <div id="about-backdrop" class="about-backdrop" hidden>
+        <section id="about-dialog" class="window about-dialog" role="dialog" aria-modal="true" aria-labelledby="about-title">
+            <div id="about-titlebar" class="title-bar about-titlebar">
+                <div id="about-title" class="title-bar-text">About TexArt</div>
+                <div class="title-bar-controls">
+                    <button id="about-close" aria-label="Close"></button>
+                </div>
+            </div>
+
+            <div class="window-body about-body">
+                <img class="about-icon" src="logo.png" alt="TexArt icon" />
+                <h1>TexArt</h1>
+                <p>Scrolling text animation maker.</p>
+                <p>Made by <strong>maxpainop</strong></p>
+                <a id="about-github" href="https://github.com/maxpainop" rel="noopener noreferrer">github.com/maxpainop</a>
+                <p class="about-credit">Idea inspired by Ena Shinonomeh.</p>
+                <button id="about-ok" type="button" class="xp-button">OK</button>
+            </div>
+        </section>
+    </div>
+</body>
+</html>
