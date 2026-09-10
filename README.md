@@ -2,6 +2,20 @@
 
 TexArt turns an image into scrolling colored text. I wanted the image to stay recognizable while giving people control over how the animation is built.
 
+## Interface
+
+![TexArt interface](readme_assets/ui.png)
+
+![TexArt interface with the image preview wing](readme_assets/uiwing.png)
+
+## Example outputs
+
+![Abductors rendered as scrolling text](readme_assets/abductors.gif)
+
+![Dungeon rendered as scrolling text](readme_assets/dungeon.gif)
+
+![XP rendered as scrolling text](readme_assets/xp.gif)
+
 ## What it does
 
 - loads your own image
