@@ -40,11 +40,9 @@ npm run tauri build
 
 ## Credits
 
-The original idea and visual inspiration came from Ena Shinonomeh's Miku animation project. Thanks to Ena for giving me permission to use the project as a reference.
+The original idea and visual inspiration came from Ena Shinonomeh's Miku animation project.[ Ena Shinonomeh: `@ena.shinonomeh` on TikTok and Instagram. ]
 
 This version uses its own image processing, glyph layout, painting, animation timing, palette handling, GIF rendering, and project format. The goal was to keep the visual idea while rebuilding it around user supplied images and much more control.
-
-Ena Shinonomeh: `@ena.shinonomeh` on TikTok and Instagram.
 
 ## License
 

@@ -108,6 +108,7 @@ let liveProcessTimer = null;
 let resizeProcessTimer = null;
 let programmaticResizeUntil = 0;
 let lastProcessedScene = null;
+let previewStatus = "empty";
 let exportInProgress = false;
 let pendingMxaViewport = null;
 let previewEditTimer = null;
@@ -632,6 +633,8 @@ async function clearImage() {
     state.imageUrl = null;
     state.imageElement = null;
     lastProcessedScene = null;
+    processingGeneration += 1;
+    previewStatus = "empty";
     projectStore.setImage(null);
     canvasAnimator?.clear();
     setExportEnabled(false);
@@ -713,6 +716,8 @@ async function handleFile(file, { fitOnLoad = true } = {}) {
         state.imageUrl = objectUrl;
         state.imageElement = image;
         lastProcessedScene = null;
+        processingGeneration += 1;
+        previewStatus = "empty";
         canvasAnimator?.clear();
         setExportEnabled(false);
         projectStore.setImage({
@@ -899,6 +904,7 @@ function setPalette(colors) {
     });
 
     if (state.imageElement) syncPreviewEditState(getSettings());
+    if (lastProcessedScene) scheduleLiveProcess();
 }
 
 // ui controls always pass through the project store before processing
@@ -1065,12 +1071,15 @@ function wireSettings() {
 
 function scheduleLiveProcess() {
     if (!state.imageElement) return;
+    markPreviewUpdating();
     clearTimeout(liveProcessTimer);
     liveProcessTimer = setTimeout(() => requestProcess("live-settings"), 140);
 }
 
 function schedulePaletteRefresh() {
     if (!state.imageElement) return;
+    markPreviewUpdating();
+    clearTimeout(liveProcessTimer);
     clearTimeout(paletteRefreshTimer);
 
     paletteRefreshTimer = setTimeout(() => {
@@ -1080,7 +1089,7 @@ function schedulePaletteRefresh() {
         const colors = extractProminentColors(state.imageElement, colorCount);
 
         if (colors.length) setPalette(colors);
-        if (els.settingPaletteMode?.checked) scheduleLiveProcess();
+        scheduleLiveProcess();
     }, 200);
 }
 
@@ -1118,6 +1127,13 @@ function requestProcess(source = "unknown") {
 }
 
 let processingGeneration = 0;
+
+function markPreviewUpdating() {
+    processingGeneration += 1;
+    previewStatus = "updating";
+    setExportEnabled(false);
+    setStatus("Updating preview...");
+}
 
 function nextPaint() {
     return new Promise((resolve) => requestAnimationFrame(resolve));
@@ -1199,13 +1215,15 @@ async function fitWindowToViewport(viewport) {
 }
 
 async function handleProcessRequest(event) {
-    const generation = ++processingGeneration;
     const { imageElement, settings } = {
         imageElement: state.imageElement,
         settings: event.detail?.settings || getSettings(),
     };
 
     if (!imageElement) return;
+
+    markPreviewUpdating();
+    const generation = processingGeneration;
 
     try {
         const source = event.detail?.source || "unknown";
@@ -1217,6 +1235,7 @@ async function handleProcessRequest(event) {
         }
 
         await nextPaint();
+        if (generation !== processingGeneration) return;
         const viewport = getWorkspaceViewport();
         const sourceRect = resolveSourceRect(
             imageElement.naturalWidth,
@@ -1254,9 +1273,12 @@ async function handleProcessRequest(event) {
             settings: structuredClone(settings),
             viewport: { ...contentViewport },
         };
+        previewStatus = paletteRefreshTimer ? "updating" : "ready";
         setExportEnabled(true);
         setResolution(resolution.columns, resolution.rows);
-        setStatus(`Processed ${glyphGrid.columns} × ${glyphGrid.rows} characters.`);
+        setStatus(previewStatus === "ready"
+            ? `Ready. ${glyphGrid.columns} × ${glyphGrid.rows} characters.`
+            : "Updating preview...");
 
         emit("texart:processed", {
             source,
@@ -1266,6 +1288,8 @@ async function handleProcessRequest(event) {
         });
     } catch (error) {
         if (generation !== processingGeneration) return;
+        previewStatus = "error";
+        setExportEnabled(false);
         console.error("[TexArtUI] Processing failed:", error);
         setCanvasPlaceholder("> Image processing failed.");
         setStatus("Image processing failed.");
@@ -1283,6 +1307,7 @@ function wireWorkspaceResize() {
 
         if (!state.imageElement || Date.now() < programmaticResizeUntil) return;
 
+        markPreviewUpdating();
         clearTimeout(resizeProcessTimer);
         resizeProcessTimer = setTimeout(
             () => requestProcess("window-resize"),
@@ -1356,7 +1381,9 @@ function setMenuItemEnabled(id, enabled) {
 }
 
 function setExportEnabled(enabled) {
-    const available = Boolean(enabled) && !exportInProgress;
+    const available = Boolean(enabled)
+        && previewStatus === "ready"
+        && !exportInProgress;
 
     if (els.exportGifBtn) els.exportGifBtn.disabled = !available;
     if (els.exportMxaBtn) els.exportMxaBtn.disabled = !available;
@@ -1370,6 +1397,13 @@ function updateGifExportSize() {
     if (!els.gifExportScale || !els.gifExportSize) return;
 
     els.gifExportScale.value = String(state.gifScale);
+
+    if (previewStatus === "updating" || previewStatus === "error") {
+        els.gifExportSize.textContent = previewStatus === "updating"
+            ? "Updating..."
+            : "Process again";
+        return;
+    }
 
     if (!lastProcessedScene) {
         els.gifExportSize.textContent = "Process first";
@@ -1400,8 +1434,10 @@ function updateGifExportSize() {
 }
 
 async function exportLoopingGif() {
-    if (!lastProcessedScene || exportInProgress) return;
+    if (!lastProcessedScene || previewStatus !== "ready" || exportInProgress) return;
 
+    const scene = lastProcessedScene;
+    const scale = state.gifScale;
     exportInProgress = true;
     setExportEnabled(false);
 
@@ -1419,11 +1455,11 @@ async function exportLoopingGif() {
         }
 
         const blob = await encodeLoopingGif(
-            lastProcessedScene,
+            scene,
             (progress) => {
                 setStatus(`Recording GIF... ${Math.round(progress * 100)}%`);
             },
-            state.gifScale
+            scale
         );
         await writeBlobToPath(path, blob);
         setStatus(`Saved ${filename}.`);
@@ -1437,14 +1473,21 @@ async function exportLoopingGif() {
 }
 
 async function exportMxaProject() {
-    if (!lastProcessedScene || !state.imageFile || exportInProgress) return;
+    if (
+        !lastProcessedScene || previewStatus !== "ready"
+        || !state.imageFile || exportInProgress
+    ) return;
 
+    const scene = lastProcessedScene;
+    const imageFile = state.imageFile;
+    const project = projectStore.getSnapshot();
+    project.settings = structuredClone(scene.settings);
     exportInProgress = true;
     setExportEnabled(false);
     setStatus("Saving MXA project...");
 
     try {
-        const filename = `${safeBasename(state.imageFile.name)}.mxa`;
+        const filename = `${safeBasename(imageFile.name)}.mxa`;
         const path = await chooseSavePath({
             filename,
             title: "Save MXA Project",
@@ -1456,12 +1499,10 @@ async function exportMxaProject() {
             return;
         }
 
-        const project = projectStore.getSnapshot();
-        project.settings = structuredClone(lastProcessedScene.settings);
         const document = await createMxaDocument({
             project,
-            imageFile: state.imageFile,
-            viewport: lastProcessedScene.viewport,
+            imageFile,
+            viewport: scene.viewport,
         });
         const blob = new Blob([JSON.stringify(document)], {
             type: "application/json",
